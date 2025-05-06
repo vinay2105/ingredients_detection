@@ -2,48 +2,49 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from ultralytics import YOLO
 from PIL import Image
-import tempfile
-import os
+import numpy as np
+import io
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Ingredient Detector API",
-    description="Detects ingredients in a fridge image using YOLOv8.",
+    title="Optimized Ingredient Detector API",
+    description="Detects ingredients from a fridge image using YOLOv8 with image resizing.",
     version="1.0"
 )
 
-# Load YOLOv8 model
+# Load YOLOv8 model once at startup (using yolov8n.pt for lightweight inference)
 model = YOLO('yolov8n.pt')
 
 @app.post("/detect-ingredients")
 async def detect_ingredients(file: UploadFile = File(...)):
     try:
-        # Save uploaded image to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-            image = Image.open(file.file)
-            image.save(temp_file.name)
-            temp_image_path = temp_file.name
+        # Read uploaded image bytes
+        image_bytes = await file.read()
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
-        # Run YOLOv8 detection
-        results = model.predict(temp_image_path, save=False)
+        # Resize image to 640x640 for faster inference
+        image = image.resize((640, 640))
 
-        # Extract detected ingredients
+        # Convert image to NumPy array for YOLOv8
+        image_np = np.array(image)
+
+        # Run YOLOv8 detection directly on NumPy array, disable save/verbose
+        results = model.predict(source=image_np, save=False, verbose=False)
+
+        # Extract detected labels (ingredients)
         detected_ingredients = set()
         for box in results[0].boxes:
             cls_id = int(box.cls[0])
             label = model.names[cls_id]
             detected_ingredients.add(label)
 
-        # Clean up temp image
-        os.remove(temp_image_path)
-
         # Convert set to comma-separated string
         ingredients_string = ", ".join(detected_ingredients)
 
-        # Return detected ingredients string in JSON
-        return JSONResponse(content={
-            "detected_ingredients": ingredients_string
-        })
+        # Return detected ingredients as JSON response
+        return JSONResponse(content={"detected_ingredients": ingredients_string})
 
     except Exception as e:
+        # Error handling
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
