@@ -13,7 +13,7 @@ app = FastAPI(
 )
 
 # Load YOLOv8 model
-model = YOLO('yolov8l.pt')
+model = YOLO('yolov8n.pt')
 
 @app.post("/detect-ingredients")
 async def detect_ingredients(file: UploadFile = File(...)):
