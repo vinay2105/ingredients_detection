@@ -7,7 +7,7 @@ import io
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Local ONNX Ingredient Detector API",
+    title="Ingredient Detector API",
     description="Detects ingredients from an image using a local YOLOv8 ONNX model.",
     version="1.0"
 )
