@@ -1,63 +1,71 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 import onnxruntime as ort
-import numpy as np
 from PIL import Image
+import numpy as np
 import io
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Ingredient Detector API",
-    description="Detects ingredients from a fridge image using YOLOv8 with ONNX.",
+    title="Optimized Ingredient Detector API",
+    description="Detects ingredients from a fridge image using YOLOv8 with image resizing.",
     version="1.0"
 )
 
-# Load the ONNX model (YOLOv8) into ONNX Runtime
-onnx_model_path = "yolov8n.onnx"  # Path to the locally downloaded ONNX model
+# Load the ONNX model
+onnx_model_path = "yolov8n.onnx"  # Update with your path to the downloaded ONNX model
 session = ort.InferenceSession(onnx_model_path)
 
-# Extract the input name from the model
-input_name = session.get_inputs()[0].name
+# COCO class labels for YOLOv8
+coco_labels = [
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 
+    'fire hydrant', 'none', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 
+    'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'none', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase',
+    'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 
+    'surfboard', 'tennis racket', 'bottle', 'none', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 
+    'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 
+    'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'none', 'tv', 'laptop', 'mouse', 'remote',
+    'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 
+    'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
 
 @app.post("/detect-ingredients")
 async def detect_ingredients(file: UploadFile = File(...)):
     try:
-        # Read the uploaded image
+        # Read uploaded image bytes
         image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
-        # Resize the image to 640x640 for YOLOv8 (standard input size)
+        # Resize image to 640x640 for faster inference
         image = image.resize((640, 640))
-        img_np = np.array(image).astype(np.float32)
 
-        # Normalize the image to [0, 1] range and convert from HWC to CHW format
-        img_np = img_np / 255.0
-        img_np = np.transpose(img_np, (2, 0, 1))  # HWC to CHW
-        img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
+        # Convert image to NumPy array for ONNX model input
+        image_np = np.array(image).astype(np.float32)
+        image_np = np.transpose(image_np, (2, 0, 1))  # Change from HWC to CHW format
+        image_np = np.expand_dims(image_np, axis=0)  # Add batch dimension
 
-        # Run inference on the image
-        outputs = session.run(None, {input_name: img_np})
+        # Run the ONNX model
+        inputs = {session.get_inputs()[0].name: image_np}
+        detections = session.run(None, inputs)[0]
 
-        # Parse the output (this part depends on the YOLOv8 ONNX output format)
-        detections = outputs[0]  # Detection outputs (could be in format [batch, detections, 6])
-        detected_labels = []
+        # Extract detected labels (ingredients)
+        detected_ingredients = set()
+        for detection in detections[0]:
+            # Extract class ID from the detection (assuming class ID is in index 5)
+            class_id = int(detection[5])
+            label = coco_labels[class_id]  # Map class ID to label
+            detected_ingredients.add(label)
 
-        # Iterate through detections and extract detected labels
-        for i in range(detections.shape[1]):
-            # Extract the class ID of the detection (assuming class ID is in index 5)
-            class_id = int(detections[0, i, 5])
-            label = session.get_meta().get('labels')[class_id]  # Assuming labels are in the model metadata
-            detected_labels.append(label)
+        # Convert set to comma-separated string
+        ingredients_string = ", ".join(detected_ingredients)
 
-        # Return the detected labels as a response
-        return JSONResponse(content={
-            "message": f"Model ran successfully. {len(detected_labels)} detections found.",
-            "detected_labels": detected_labels
-        })
+        # Return detected ingredients as JSON response
+        return JSONResponse(content={"detected_ingredients": ingredients_string})
 
     except Exception as e:
-        # Handle errors and exceptions
+        # Error handling
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
 
 
